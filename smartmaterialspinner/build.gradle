@@ -8,18 +8,18 @@ ext {
     LIBRARY_NAME = 'SmartMaterialSpinner'
     PUBLISH_GROUP_ID = 'com.github.chivorns'
     PUBLISH_ARTIFACT_ID = LIBRARY_NAME.toLowerCase()
-    PUBLISH_VERSION = '2.0.0'
+    PUBLISH_VERSION = '2.1.0'
     PUBLISH_DESCRIPTION = "Provide with more customization for your spinner."
 
     // Github
-    GIT_REPO_URL = 'https://github.com/Chivorns/SmartMaterialSpinner'
+    GIT_REPO_URL = 'https://github.com/justcheckandfun/SmartMaterialSpinner'
     GIT_VCS_URL = GIT_REPO_URL + '.git'
-    GIT_USER_REPO_NAME = 'Chivorns/SmartMaterialSpinner'
+    GIT_USER_REPO_NAME = 'justcheckandfun/SmartMaterialSpinner'
 
     // Developer Info
-    DEVELOPER_ID = 'chivorns'
-    DEVELOPER_NAME = 'Chivorn'
-    DEVELOPER_EMAIL = 'chivorn@live.com'
+    DEVELOPER_ID = 'z'
+    DEVELOPER_NAME = 'h'
+    DEVELOPER_EMAIL = ''
 
     // Licence
     LICENSE_NAME = 'The Apache Software License, Version 2.0'
