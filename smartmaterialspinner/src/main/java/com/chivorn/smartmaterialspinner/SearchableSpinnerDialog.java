@@ -441,6 +441,10 @@ public class SearchableSpinnerDialog<T> extends DialogFragment implements Search
         outputFormat.setToneType(HanyuPinyinToneType.WITHOUT_TONE);
         outputFormat.setCaseType(HanyuPinyinCaseType.LOWERCASE);
 
+        // 清空 Trie 树
+        pinyinTrieMap.clear();
+        pinyinLetterTrieMap.clear();
+
         for (T item : allItemsFirst) {
             String itemStr = item.toString().toLowerCase();
 
