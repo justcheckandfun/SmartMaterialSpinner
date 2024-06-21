@@ -378,12 +378,12 @@ public class SearchableSpinnerDialog<T> extends DialogFragment implements Search
         // 刷新列表数据
         // 1. 使用 LinkedHashSet 去重并保持顺序
         Set<T> uniqueItems = new LinkedHashSet<>(filteredItems);
-        // 2. 将去重后的结果重新添加到 filteredItems 列表中
-        filteredItems.clear(); // 清空原有的 filteredItems 列表
-        filteredItems.addAll(uniqueItems);
+//        // 2. 将去重后的结果重新添加到 filteredItems 列表中
+//        filteredItems.clear(); // 清空原有的 filteredItems 列表
+//        filteredItems.addAll(uniqueItems);
 
         searchArrayAdapter.clear();
-        searchArrayAdapter.addAll(filteredItems);
+        searchArrayAdapter.addAll(uniqueItems);
         searchArrayAdapter.notifyDataSetChanged();
         return true;
     }
