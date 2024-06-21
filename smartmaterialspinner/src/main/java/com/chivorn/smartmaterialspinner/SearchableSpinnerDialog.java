@@ -12,6 +12,7 @@ import android.os.Bundle;
 import android.text.SpannableString;
 import android.text.TextUtils;
 import android.text.style.ForegroundColorSpan;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -33,9 +34,22 @@ import androidx.fragment.app.DialogFragment;
 import com.chivorn.smartmaterialspinner.adapter.SearchAdapter;
 import com.chivorn.smartmaterialspinner.util.StringUtils;
 
+import net.sourceforge.pinyin4j.PinyinHelper;
+import net.sourceforge.pinyin4j.format.HanyuPinyinCaseType;
+import net.sourceforge.pinyin4j.format.HanyuPinyinOutputFormat;
+import net.sourceforge.pinyin4j.format.HanyuPinyinToneType;
+import net.sourceforge.pinyin4j.format.exception.BadHanyuPinyinOutputFormatCombination;
+
 import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class SearchableSpinnerDialog<T> extends DialogFragment implements SearchView.OnQueryTextListener, SearchView.OnCloseListener {
     private static final String TAG = SearchableSpinnerDialog.class.getSimpleName();
@@ -87,6 +101,12 @@ public class SearchableSpinnerDialog<T> extends DialogFragment implements Search
     private DialogInterface.OnClickListener dialogListener;
     private SmartMaterialSpinner<T> smartMaterialSpinner;
     private boolean isDismissOnSelected = true;
+
+    private List<T> items; // 存储所有数据项
+    private List<T> allItemsFirst;
+    private List<T> filteredItems; // 存储过滤后的数据项
+    private final ConcurrentHashMap<String, TrieNode> pinyinTrieMap = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, TrieNode> pinyinLetterTrieMap = new ConcurrentHashMap<>();
 
     public SearchableSpinnerDialog() {
     }
@@ -196,6 +216,10 @@ public class SearchableSpinnerDialog<T> extends DialogFragment implements Search
 
         List items = savedInstanceState != null ? (List) savedInstanceState.getSerializable(INSTANCE_LIST_ITEMS) : null;
         if (items != null) {
+            this.items = items; // 保存这个是实时的 所有数据项
+            this.allItemsFirst = new ArrayList<>(this.items);  // 保存所有数据项
+            // 初始化拼音和首字母索引
+            initPinyinAndLetterIndex();
             searchArrayAdapter = new SearchAdapter<T>(getActivity(), searchDropdownView, items) {
                 @NonNull
                 @Override
@@ -217,9 +241,13 @@ public class SearchableSpinnerDialog<T> extends DialogFragment implements Search
                         if (searchFilterColor != 0 && searchView.getQuery() != null && !searchView.getQuery().toString().isEmpty()) {
                             String query = StringUtils.removeDiacriticalMarks(searchView.getQuery().toString()).toLowerCase(Locale.getDefault());
                             String fullText = StringUtils.removeDiacriticalMarks(tvListItem.getText().toString()).toLowerCase(Locale.getDefault());
-                            int start = fullText.indexOf(query);
-                            int end = start + query.length();
-                            spannableString.setSpan(new ForegroundColorSpan(searchFilterColor), start, end, 0);
+                            if (!TextUtils.isEmpty(query)) {
+                                int start = fullText.indexOf(query);
+                                int end = start + query.length();
+                                if (start >= 0 && end >= 0) {
+                                    spannableString.setSpan(new ForegroundColorSpan(searchFilterColor), start, end, 0);
+                                }
+                            }
                             tvListItem.setText(spannableString, TextView.BufferType.SPANNABLE);
                         }
                     }
@@ -335,16 +363,220 @@ public class SearchableSpinnerDialog<T> extends DialogFragment implements Search
     }
 
     @Override
-    public boolean onQueryTextChange(String s) {
-        if (TextUtils.isEmpty(s)) {
-            ((ArrayAdapter) searchListView.getAdapter()).getFilter().filter(null);
+    public boolean onQueryTextChange(String searchText) {
+        // 判断搜索内容是否为空
+        if (TextUtils.isEmpty(searchText)) {
+            // 显示所有数据
+            filteredItems = allItemsFirst;
         } else {
-            ((ArrayAdapter) searchListView.getAdapter()).getFilter().filter(s);
+            // 创建一个新的列表用于存储匹配的数据
+            filteredItems = new ArrayList<>();
+
+            searchText = searchText.toLowerCase(); // 统一为小写
+            searchTextPaired(searchText);
         }
-        if (onSearchTextChanged != null) {
-            onSearchTextChanged.onSearchTextChanged(s);
-        }
+        // 刷新列表数据
+        // 1. 使用 LinkedHashSet 去重并保持顺序
+        Set<T> uniqueItems = new LinkedHashSet<>(filteredItems);
+        // 2. 将去重后的结果重新添加到 filteredItems 列表中
+        filteredItems.clear(); // 清空原有的 filteredItems 列表
+        filteredItems.addAll(uniqueItems);
+
+        searchArrayAdapter.clear();
+        searchArrayAdapter.addAll(filteredItems);
+        searchArrayAdapter.notifyDataSetChanged();
         return true;
+    }
+
+    // 建立拼音前缀索引
+    // Trie 树节点
+    class TrieNode {
+        char value;
+        Map<Character, TrieNode> children;
+        List<T> data;
+
+        TrieNode(char value) {
+            this.value = value;
+            this.children = new HashMap<>();
+            this.data = new ArrayList<>();
+        }
+    }
+
+    // Trie 树
+    class Trie {
+        TrieNode root;
+
+        Trie() {
+            root = new TrieNode(' '); // 根节点
+        }
+
+        // 插入拼音或首字母
+        void insert(String key, T data) {
+            TrieNode node = root;
+            for (char c : key.toCharArray()) {
+                if (!node.children.containsKey(c)) {
+                    node.children.put(c, new TrieNode(c));
+                }
+                node = node.children.get(c);
+            }
+            node.data.add(data);
+        }
+
+        // 查询包含 searchText 的所有数据项
+        List<T> search(String searchText) {
+            TrieNode node = root;
+            for (char c : searchText.toCharArray()) {
+                if (!node.children.containsKey(c)) {
+                    return new ArrayList<>(); // 没有匹配项
+                }
+                node = node.children.get(c);
+            }
+            return node.data; // 返回所有匹配项
+        }
+    }
+
+    // 初始化拼音 index
+    private void initPinyinAndLetterIndex() {
+        HanyuPinyinOutputFormat outputFormat = new HanyuPinyinOutputFormat();
+        outputFormat.setToneType(HanyuPinyinToneType.WITHOUT_TONE);
+        outputFormat.setCaseType(HanyuPinyinCaseType.LOWERCASE);
+
+        for (T item : allItemsFirst) {
+            String itemStr = item.toString().toLowerCase();
+
+            if (isChinese(itemStr.charAt(0))) {
+                String pinyin = convertToPinyin(itemStr);
+                String pinyinLetter = convertToPinyinLetter(itemStr);
+
+                // 使用 Trie 树插入拼音和首字母，并存储原始中文值
+                // 插入完整的拼音或首字母
+                insertTrieNode(pinyinTrieMap, pinyin, item); // 传递原始中文值
+                insertTrieNode(pinyinLetterTrieMap, pinyinLetter, item); // 传递原始中文值
+                // 插入所有前缀
+                for (int i = 1; i < pinyin.length(); i++) {
+                    String prefix = pinyin.substring(0, i);
+                    insertTrieNode(pinyinTrieMap, prefix, item);
+                }
+                for (int i = 1; i < pinyinLetter.length(); i++) {
+                    String prefix = pinyinLetter.substring(0, i);
+                    insertTrieNode(pinyinLetterTrieMap, prefix, item);
+                }
+            }
+        }
+    }
+
+    private void insertTrieNode(ConcurrentHashMap<String, TrieNode> trieMap, String key, T originalValue) {
+        TrieNode node = trieMap.get(key);
+        if (node == null) {
+            node = new TrieNode(' '); // 创建新的节点
+            trieMap.put(key, node);
+        }
+
+        // 将原始中文值存储在节点的 data 列表中
+        node.data.add(originalValue);
+
+        // 将 key 的所有前缀也插入到 Trie 树中
+        for (int i = 1; i <= key.length(); i++) {
+            String prefix = key.substring(0, i);
+            if (!trieMap.containsKey(prefix)) {
+                trieMap.put(prefix, new TrieNode(' '));
+            }
+        }
+    }
+
+
+    private void searchTextPaired(String searchText) {
+        if (isAllNonChinese(searchText)) {
+            // 所有字符都不包含中文
+            // 非中文匹配
+            for (T item : allItemsFirst) {
+                String itemStr = item.toString().toLowerCase();
+                if (!isChinese(itemStr.charAt(0)) && itemStr.contains(searchText)) {
+                    filteredItems.add(item);
+                }
+            }
+
+            // 使用 Trie 树进行包含查询
+            // 拼音匹配
+            List<T> matchedPinyinItems = search(searchText, pinyinTrieMap);
+            if (!matchedPinyinItems.isEmpty()) {
+                filteredItems.addAll(matchedPinyinItems);
+            }
+            // 拼音首字母匹配
+            List<T> matchedLetterItems = search(searchText, pinyinLetterTrieMap);
+            if (!matchedLetterItems.isEmpty()) {
+                filteredItems.addAll(matchedLetterItems);
+            }
+        } else {
+            // 包含中文
+            // 汉字匹配
+            for (T item : allItemsFirst) {
+                String itemStr = item.toString().toLowerCase();
+                if (itemStr.contains(searchText)) {
+                    filteredItems.add(item);
+                    return;
+                }
+            }
+        }
+    }
+
+    // 查询包含 searchText 的所有数据项
+    List<T> search(String searchText, ConcurrentHashMap<String, TrieNode> trieMap) {
+        TrieNode node = trieMap.get(searchText);
+        if (node == null) {
+            return new ArrayList<>(); // 没有匹配项
+        }
+        // 使用 Set 存储搜索结果，避免重复元素
+        Set<T> result = new HashSet<>(node.data);
+        return new ArrayList<>(result); // 返回去重后的结果
+    }
+
+    private boolean isChinese(char c) {
+        Character.UnicodeBlock ub = Character.UnicodeBlock.of(c);
+        if (ub == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS || ub == Character.UnicodeBlock.CJK_COMPATIBILITY_IDEOGRAPHS || ub == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_A || ub == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_B || ub == Character.UnicodeBlock.CJK_COMPATIBILITY_IDEOGRAPHS_SUPPLEMENT) {
+            return true;
+        }
+        return false;
+    }
+
+    private boolean isAllNonChinese(String text) {
+        for (char c : text.toCharArray()) {
+            if (isChinese(c)) {
+                return false; // 存在中文，返回false
+            }
+        }
+        return true; // 所有字符都为非中文，返回true
+    }
+
+    public String convertToPinyin(String chineseText) {
+        StringBuilder pinyin = new StringBuilder();
+        for (char c : chineseText.toCharArray()) {
+            String[] pinyinArray = PinyinHelper.toHanyuPinyinStringArray(c);
+            if (pinyinArray != null) {
+                // 使用正则表达式去除声调数字
+                String pinyinWithoutTone = pinyinArray[0].replaceAll("\\d", "");
+                pinyin.append(pinyinWithoutTone);
+            } else {
+                Log.e(TAG, "拼音转换错误：" + c);
+                // 如果无法转换，则保留原字符
+            }
+        }
+        return pinyin.toString();
+    }
+
+    public String convertToPinyinLetter(String chineseText) {
+        StringBuilder pinyinLetter = new StringBuilder();
+        for (char c : chineseText.toCharArray()) {
+            String[] pinyinArray = PinyinHelper.toHanyuPinyinStringArray(c);
+            if (pinyinArray != null) {
+                char charLatter = pinyinArray[0].toString().charAt(0);
+                pinyinLetter.append(charLatter); // 取第一个拼音
+            } else {
+                Log.e(TAG, "拼音转换错误：" + c);
+                // 如果无法转换，则保留原字符
+            }
+        }
+        return pinyinLetter.toString();
     }
 
     @Override
