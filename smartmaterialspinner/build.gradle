@@ -57,6 +57,9 @@ dependencies {
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
 
     implementation 'com.belerweb:pinyin4j:2.5.0'
+    implementation 'com.readystatesoftware.sqliteasset:sqliteassethelper:2.0.1'
 }
+//  模块中 \SmartMaterialSpinner\smartmaterialspinner>
+// 用于该 module 生成本地 aar 包 ..\gradlew.bat assembleRelease
 
 //apply from: "${rootProject.projectDir}/scripts/publish-module.gradle"

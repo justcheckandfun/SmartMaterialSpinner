@@ -69,6 +69,9 @@ public class MainApp<T> extends AppCompatActivity implements View.OnClickListene
         provinceList.add("海南省");
         provinceList.add("山东省");
         provinceList.add("广西");
+        provinceList.add("中山");
+        provinceList.add("舟山");
+        provinceList.add("长沙");
         provinceList.add("Banteay Meanchey");
         provinceList.add("Battambang");
         provinceList.add("Kampong Cham");

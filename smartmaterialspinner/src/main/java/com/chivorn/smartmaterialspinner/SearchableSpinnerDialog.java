@@ -5,6 +5,8 @@ import android.app.Dialog;
 import android.app.SearchManager;
 import android.content.Context;
 import android.content.DialogInterface;
+import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.os.Build;
@@ -33,12 +35,12 @@ import androidx.fragment.app.DialogFragment;
 
 import com.chivorn.smartmaterialspinner.adapter.SearchAdapter;
 import com.chivorn.smartmaterialspinner.util.StringUtils;
+import com.readystatesoftware.sqliteasset.SQLiteAssetHelper;
 
 import net.sourceforge.pinyin4j.PinyinHelper;
 import net.sourceforge.pinyin4j.format.HanyuPinyinCaseType;
 import net.sourceforge.pinyin4j.format.HanyuPinyinOutputFormat;
 import net.sourceforge.pinyin4j.format.HanyuPinyinToneType;
-import net.sourceforge.pinyin4j.format.exception.BadHanyuPinyinOutputFormatCombination;
 
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -449,8 +451,8 @@ public class SearchableSpinnerDialog<T> extends DialogFragment implements Search
             String itemStr = item.toString().toLowerCase();
 
             if (isChinese(itemStr.charAt(0))) {
-                String pinyin = convertToPinyin(itemStr);
-                String pinyinLetter = convertToPinyinLetter(itemStr);
+                String pinyin = convertToPinyinFromSqlite(itemStr);
+                String pinyinLetter = convertToPinyinLetterFromSqlite(itemStr);
 
                 // 使用 Trie 树插入拼音和首字母，并存储原始中文值
                 // 插入完整的拼音或首字母
@@ -553,8 +555,15 @@ public class SearchableSpinnerDialog<T> extends DialogFragment implements Search
     }
 
     public String convertToPinyin(String chineseText) {
+        // TODO 多音字（键值对）
         StringBuilder pinyin = new StringBuilder();
-        for (char c : chineseText.toCharArray()) {
+
+        String apartChineseText = chineseText;
+        if (chineseText.matches("长沙")) {
+            pinyin.append("changsha");
+            apartChineseText = chineseText.replaceAll("长沙", "");
+        }
+        for (char c : apartChineseText.toCharArray()) {
             String[] pinyinArray = PinyinHelper.toHanyuPinyinStringArray(c);
             if (pinyinArray != null) {
                 // 使用正则表达式去除声调数字
@@ -568,12 +577,121 @@ public class SearchableSpinnerDialog<T> extends DialogFragment implements Search
         return pinyin.toString();
     }
 
+    // City 类
+    public static class City {
+        public String name;
+        public String pinyin;
+
+        public City(String name, String pinyin) {
+            this.name = name;
+            this.pinyin = pinyin;
+        }
+    }
+
+    public static class CityDatabaseHelper extends SQLiteAssetHelper {
+
+        private static final String DATABASE_NAME = "mydatabase.sqlite";
+        private final Context mContext; // 添加成员变量保存 context
+        private static final int DATABASE_VERSION = 1;
+
+        public CityDatabaseHelper(Context context) {
+            super(context, DATABASE_NAME, null, DATABASE_VERSION);
+            this.mContext = context;
+        }
+
+        public void printAllTableNames() {
+            SQLiteDatabase db = this.getReadableDatabase();
+
+            // 查询所有表格名称
+            Cursor cursor = db.rawQuery("SELECT name FROM sqlite_master WHERE type='table'", null);
+
+            // 打印表格名称到日志
+            if (cursor.moveToFirst()) {
+                do {
+                    String tableName = cursor.getString(0);
+                    Log.d("Table Name", tableName);
+                } while (cursor.moveToNext());
+            }
+            cursor.close();
+            db.close();
+        }
+
+        // 查询城市名匹配的城市列表
+        public List<City> queryCitiesByName(String name) {
+            List<City> cities = new ArrayList<>();
+            SQLiteDatabase db = this.getReadableDatabase();
+
+            // 使用占位符和 rawQuery 方法执行 SQL 语句
+            // 确保 SQL 语句能够正确地访问 location 表格
+            String sql = "select ext_name,pinyin from location where ext_name like ?";
+            Cursor cursor = db.rawQuery(sql, new String[]{"%" + name + "%"});
+
+            if (cursor.moveToFirst()) {
+                do {
+                    // 检查列是否存在
+                    if (cursor.getColumnIndex("ext_name") != -1 && cursor.getColumnIndex("pinyin") != -1) {
+                        String cityName = cursor.getString(cursor.getColumnIndex("ext_name"));
+                        String pinyin = cursor.getString(cursor.getColumnIndex("pinyin"));
+                        cities.add(new City(cityName, pinyin));
+                    }
+                } while (cursor.moveToNext());
+            }
+            cursor.close();
+            db.close();
+            return cities;
+        }
+
+        @Override
+        public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+            // 处理数据库升级
+        }
+    }
+
+    public String convertToPinyinFromSqlite(String chineseText) {
+        // TODO 多音字（键值对）
+        StringBuilder pinyin = new StringBuilder();
+        CityDatabaseHelper dbHelper = new CityDatabaseHelper(getContext());
+
+        List<City> cities = dbHelper.queryCitiesByName(chineseText);
+        if (cities.size() > 0) {
+            return cities.get(0).pinyin.replace(" ", "");
+        }
+        else {
+            pinyin.append(convertToPinyin(chineseText));
+        }
+        return pinyin.toString();
+    }
+
+    public String convertToPinyinLetterFromSqlite(String chineseText) {
+        // TODO 多音字（键值对）
+        StringBuilder pinyinLetter = new StringBuilder();
+        CityDatabaseHelper dbHelper = new CityDatabaseHelper(getContext());
+        // 使用数据库类进行查询
+        List<City> cities = dbHelper.queryCitiesByName(chineseText);
+        if (cities.size() > 0) {
+            // 通过空格分割字符串
+            String[] parts = cities.get(0).pinyin.split(" ");
+            // 循环处理每个部分
+            for (String part : parts) {
+                // 获取首字母
+                String firstLetter = part.substring(0, 1);
+                // 将首字母追加到 StringBuilder
+                pinyinLetter.append(firstLetter);
+            }
+        }
+        else {
+            pinyinLetter.append(convertToPinyinLetter(chineseText));
+        }
+        return pinyinLetter.toString();
+    }
+
     public String convertToPinyinLetter(String chineseText) {
+        // TODO 多音字（键值对）
         StringBuilder pinyinLetter = new StringBuilder();
         for (char c : chineseText.toCharArray()) {
             String[] pinyinArray = PinyinHelper.toHanyuPinyinStringArray(c);
             if (pinyinArray != null) {
-                char charLatter = pinyinArray[0].toString().charAt(0);
+                char charLatter = pinyinArray[0].charAt(0);
                 pinyinLetter.append(charLatter); // 取第一个拼音
             } else {
                 Log.e(TAG, "拼音转换错误：" + c);
