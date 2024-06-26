@@ -520,7 +520,6 @@ public class SearchableSpinnerDialog<T> extends DialogFragment implements Search
                 String itemStr = item.toString().toLowerCase();
                 if (itemStr.contains(searchText)) {
                     filteredItems.add(item);
-                    return;
                 }
             }
         }
